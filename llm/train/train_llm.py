@@ -7,7 +7,7 @@ import argparse
 import numpy as np
 import numpy.typing as npt
 import os
-from typing import Union
+from typing import Union, Tuple
 from llm.data import get_batch, random_training_iterator, SequentialValidationDataset
 from llm.nn_utils import cross_entropy
 from llm.optimizer import AdamW, get_lr_cosine_schedule, gradient_clipping
@@ -74,7 +74,7 @@ def train_LLM(
     tokenizer: Tokenizer,
     num_iters: int,
     device: str,
-    train_dataloader: Iterator[tuple[torch.Tensor, torch.Tensor]],
+    train_dataloader: Iterator[Tuple[torch.Tensor, torch.Tensor]],
     val_dataloader: Union[IterableDataset, None],
     out: str,
     checkpoint_interval: int,

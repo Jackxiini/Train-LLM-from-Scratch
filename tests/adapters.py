@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import IO, Any, BinaryIO
+from typing import IO, Any, BinaryIO, Tuple
 from collections.abc import Iterable
 from jaxtyping import Float, Int
 import re
@@ -500,7 +500,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
 
 def run_get_batch(
     dataset: npt.NDArray, batch_size: int, context_length: int, device: str
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Given a dataset (a 1D numpy array of integers) and a desired batch size and
     context length, sample language modeling input sequences and their corresponding

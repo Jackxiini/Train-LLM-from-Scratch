@@ -1,4 +1,4 @@
-from typing import Iterator, Union
+from typing import Iterator, Union, Tuple
 import torch
 import numpy as np
 import numpy.typing as npt
@@ -6,7 +6,7 @@ from torch.utils.data import IterableDataset
 
 def get_batch(dataset: npt.NDArray, 
               batch_size: int, 
-              context_length: int, device: Union[str, torch.device]) -> tuple[torch.Tensor, torch.Tensor]:
+              context_length: int, device: Union[str, torch.device]) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Given a dataset (a 1D numpy array of integers) and a desired batch size and
     context length, sample language modeling input sequences and their corresponding
@@ -60,7 +60,7 @@ def random_training_iterator(
     context_length: int,
     device: Union[str, torch.device],
     max_iter: int,
-) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
     """
     Yields `max_iter` random training batches using get_batch.
     """
@@ -99,7 +99,7 @@ class SequentialValidationDataset(IterableDataset):
         """
         return (self.num_sequences - 1) // self.batch_size + 1
 
-    def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+    def __iter__(self) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
         # Generate all sequences
         all_x = []
         all_y = []
