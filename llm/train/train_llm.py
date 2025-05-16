@@ -7,6 +7,7 @@ import argparse
 import numpy as np
 import numpy.typing as npt
 import os
+from typing import Union
 from llm.data import get_batch, random_training_iterator, SequentialValidationDataset
 from llm.nn_utils import cross_entropy
 from llm.optimizer import AdamW, get_lr_cosine_schedule, gradient_clipping
@@ -74,7 +75,7 @@ def train_LLM(
     num_iters: int,
     device: str,
     train_dataloader: Iterator[tuple[torch.Tensor, torch.Tensor]],
-    val_dataloader: IterableDataset | None,
+    val_dataloader: Union[IterableDataset, None],
     out: str,
     checkpoint_interval: int,
     log_interval: int,
@@ -123,10 +124,14 @@ def train_LLM(
         logger.info(f"Resumed from iteration {start_iter}")
 
     model.train()
-    logger.info("Compiling model with torch.compile...")
     try:
+        import triton
+        logger.info("Triton is available, compiling model with torch.compile...")
         compiled_model = torch.compile(model, mode="max-autotune", fullgraph=True, dynamic=False)
         logger.info("Model compilation successful")
+    except ImportError:
+        logger.warning("Triton is not available. Running without torch.compile (this may be slower)")
+        compiled_model = model
     except Exception as e:
         logger.warning(f"Model compilation failed: {str(e)}. Falling back to eager mode.")
         compiled_model = model

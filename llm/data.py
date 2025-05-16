@@ -1,4 +1,4 @@
-from typing import Iterator
+from typing import Iterator, Union
 import torch
 import numpy as np
 import numpy.typing as npt
@@ -6,7 +6,7 @@ from torch.utils.data import IterableDataset
 
 def get_batch(dataset: npt.NDArray, 
               batch_size: int, 
-              context_length: int, device: str | torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+              context_length: int, device: Union[str, torch.device]) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Given a dataset (a 1D numpy array of integers) and a desired batch size and
     context length, sample language modeling input sequences and their corresponding
@@ -28,20 +28,29 @@ def get_batch(dataset: npt.NDArray,
     x = np.array([dataset[i:i+context_length] for i in start_idx])
     y = np.array([dataset[i+1:i+context_length+1] for i in start_idx])
 
-    x_tensor = torch.from_numpy(x).to(device, dtype=torch.int64)
-    y_tensor = torch.from_numpy(y).to(device, dtype=torch.int64)
+    # First create tensors on CPU
+    x_tensor = torch.from_numpy(x).to(dtype=torch.int64)
+    y_tensor = torch.from_numpy(y).to(dtype=torch.int64)
 
     # Convert device to string for checking device type
     device_str = str(device)
+    
+    # Handle device placement and memory optimization
     if "cuda" in device_str:
+        # Pin memory for faster CPU to GPU transfer
         x_tensor = x_tensor.pin_memory()
         y_tensor = y_tensor.pin_memory()
+        # Move to GPU with non_blocking=True for async transfer
+        x_tensor = x_tensor.to(device, non_blocking=True)
+        y_tensor = y_tensor.to(device, non_blocking=True)
     elif "mps" in device_str:
-        x_tensor = x_tensor.to(memory_format=torch.channels_last)
-        y_tensor = y_tensor.to(memory_format=torch.channels_last)
+        # For MPS (Apple Silicon), use channels_last memory format
+        x_tensor = x_tensor.to(device, memory_format=torch.channels_last)
+        y_tensor = y_tensor.to(device, memory_format=torch.channels_last)
     else:
-        x_tensor = x_tensor.cpu()
-        y_tensor = y_tensor.cpu()
+        # For CPU, just move to device
+        x_tensor = x_tensor.to(device)
+        y_tensor = y_tensor.to(device)
 
     return x_tensor, y_tensor
 
@@ -49,7 +58,7 @@ def random_training_iterator(
     dataset: npt.NDArray,
     batch_size: int,
     context_length: int,
-    device: str | torch.device,
+    device: Union[str, torch.device],
     max_iter: int,
 ) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
     """
@@ -65,7 +74,7 @@ class SequentialValidationDataset(IterableDataset):
         dataset: npt.NDArray,
         context_length: int,
         batch_size: int,
-        device: str | torch.device = "cpu",
+        device: Union[str, torch.device] = "cpu",
     ):
         """
         IterableDataset that yields sequential non-overlapping batches from a 1D tokenized dataset.
@@ -111,13 +120,19 @@ class SequentialValidationDataset(IterableDataset):
 
         # Yield in batches
         for i in range(0, len(all_x), self.batch_size):
+            # First create tensors on CPU
             xb = torch.from_numpy(all_x[i : i + self.batch_size]).to(dtype=torch.int64)
             yb = torch.from_numpy(all_y[i : i + self.batch_size]).to(dtype=torch.int64)
 
             if "cuda" in device_str:
-                xb = xb.pin_memory().to(self.device, non_blocking=True)
-                yb = yb.pin_memory().to(self.device, non_blocking=True)
+                # Pin memory for faster CPU to GPU transfer
+                xb = xb.pin_memory()
+                yb = yb.pin_memory()
+                # Move to GPU with non_blocking=True for async transfer
+                xb = xb.to(self.device, non_blocking=True)
+                yb = yb.to(self.device, non_blocking=True)
             else:
+                # For CPU or other devices, just move to device
                 xb = xb.to(self.device)
                 yb = yb.to(self.device)
 
