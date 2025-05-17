@@ -29,22 +29,22 @@ cd ..
 ```
 
 ### Tokenizer Training (BPE)
-We adopt a GPT-2-style byte-level tokenizer using BPE (Byte-Pair Encoding). Tokenization is based on regex segmentation. Special tokens (e.g., <|endoftext|>) are excluded during training.
-Here is an example to train on owt dataset:
+We adopt a GPT-2-style byte-level tokenizer using BPE (Byte-Pair Encoding). Tokenization is based on regex segmentation. Special tokens (`<|endoftext|>`) are excluded during training.
+To train a tokenizer on OpenWebText:
 ```
 uv run llm/train/train_tokenizer.py \
 --input_path ../data/owt_train.txt --vocab_size 32000 \
 --output_dir bpe_32k_owt --prefix owt \
 --encoded_path owt_train_encoded.npy --train-bpe
 ```
-If bpe has been trained, `--train-bpe` could be set to False. Validation set is also needed to be processed.
+Once the tokenizer is trained, you can encode the validation set:
 ```
 uv run llm/train/train_tokenizer.py \
 --input_path ../data/owt_train.txt --vocab_size 32000 \
 --output_dir bpe_32k_owt --prefix owt \
 --encoded_path owt_valid_encoded.npy
 ```
-Put both train and valid npy into data folder.
+Ensure that both `owt_train_encoded.npy` and `owt_valid_encoded.npy` are saved in the `data/` directory.
 
 ### Transformer Language Model
 The implemented Transformer model uses modern components:
