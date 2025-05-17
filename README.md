@@ -47,20 +47,24 @@ uv run llm/train/train_tokenizer.py \
 Ensure that both `owt_train_encoded.npy` and `owt_valid_encoded.npy` are saved in the `data/` directory.
 
 ### Transformer Language Model
-The implemented Transformer model uses modern components:
-- Pre-Norm transformer blocks  
-- RMS Layer Normalization  
-- SwiGLU feed-forward layers (SiLU activation + Gated Linear Unit)  
-- Relative Positional Embeddings (RoPE)  
-- Causal multi-head self-attention
-The following components are also implemented from scratch:
+The Transformer model in this repository includes the following modern components:
+
+- **Pre-Layer Normalization**  
+- **RMSNorm** for lightweight normalization  
+- **SwiGLU** feed-forward layers (SiLU activation + Gated Linear Unit)  
+- **RoPE (Rotary Positional Embedding)** for relative position encoding  
+- **Causal multi-head self-attention**
+
+Additionally, the following training modules are implemented from scratch:
+
 - Cross-entropy loss  
 - AdamW optimizer  
-- Cosine annealing scheduler with warm-up  
-- Gradient clipping
+- Cosine annealing learning rate scheduler with linear warm-up  
+- Gradient clipping for stability
 
 ### Train TransformerLM
+To start training the Transformer model:
 ```
 uv run llm/train/train_llm.py
 ```
-Currently, please use float32 for precision, bfloat16 is not stable and will cause loss to nan. 
+Note: Training is currently supported with float32 precision only. Use of bfloat16 may result in unstable loss (NaNs).
