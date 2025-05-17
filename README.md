@@ -28,3 +28,23 @@ gunzip owt_valid.txt.gz
 cd ..
 ```
 
+### Train BPE Tokenizer 
+Text is split using a GPT-2-style regex. Special tokens like `<|endoftext|>` are excluded. Due to the speed, tokenizers package is suggested to use. 
+Here is an example to train on owt dataset:
+```
+uv run llm/train/train_tokenizer.py \
+--input_path ../data/owt_train.txt --vocab_size 32000 \
+--output_dir bpe_32k_owt --prefix owt \
+--encoded_path owt_train_encoded.npy --train-bpe
+```
+If bpe has been trained, `--train-bpe` could be set to False. Validation set is also needed to be processed.
+```
+uv run llm/train/train_tokenizer.py \
+--input_path ../data/owt_train.txt --vocab_size 32000 \
+--output_dir bpe_32k_owt --prefix owt \
+--encoded_path owt_valid_encoded.npy
+```
+Put both train and valid npy into data folder.
+
+### Transformer Language Model
+
