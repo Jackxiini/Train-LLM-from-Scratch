@@ -25,12 +25,12 @@ def get_batch(dataset: npt.NDArray,
         language modeling labels.
     """
     start_idx = np.random.randint(0, len(dataset)-context_length, size = batch_size)
-    x = np.array([dataset[i:i+context_length] for i in start_idx])
-    y = np.array([dataset[i+1:i+context_length+1] for i in start_idx])
+    x = np.array([dataset[i:i+context_length] for i in start_idx], dtype=np.int64)
+    y = np.array([dataset[i+1:i+context_length+1] for i in start_idx], dtype=np.int64)
 
     # First create tensors on CPU
-    x_tensor = torch.from_numpy(x).to(dtype=torch.int64)
-    y_tensor = torch.from_numpy(y).to(dtype=torch.int64)
+    x_tensor = torch.from_numpy(x)
+    y_tensor = torch.from_numpy(y)
 
     # Convert device to string for checking device type
     device_str = str(device)
@@ -112,8 +112,8 @@ class SequentialValidationDataset(IterableDataset):
             all_x.append(seq[:-1])
             all_y.append(seq[1:])
 
-        all_x = np.stack(all_x)
-        all_y = np.stack(all_y)
+        all_x = np.stack(all_x, dtype=np.int64)
+        all_y = np.stack(all_y, dtype=np.int64)
 
         # Convert device to string for checking device type
         device_str = str(self.device)
@@ -121,8 +121,8 @@ class SequentialValidationDataset(IterableDataset):
         # Yield in batches
         for i in range(0, len(all_x), self.batch_size):
             # First create tensors on CPU
-            xb = torch.from_numpy(all_x[i : i + self.batch_size]).to(dtype=torch.int64)
-            yb = torch.from_numpy(all_y[i : i + self.batch_size]).to(dtype=torch.int64)
+            xb = torch.from_numpy(all_x[i : i + self.batch_size])
+            yb = torch.from_numpy(all_y[i : i + self.batch_size])
 
             if "cuda" in device_str:
                 # Pin memory for faster CPU to GPU transfer

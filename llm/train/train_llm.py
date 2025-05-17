@@ -55,7 +55,7 @@ def delete_output_dir(output_dir):
 
 def run_generation(
         model: TransformerLM,
-        tokenizer: Tokenizer,
+        tokenizer: ByteLevelBPETokenizer,
         val_prompt: str,
         max_new_tokens: int = 100,
         temperature: float = 1.0,
@@ -65,12 +65,12 @@ def run_generation(
         device: str = "cuda:0"):
     
     with temporary_eval_model(model), torch.inference_mode():
-        generated_text = generateLLM(model, tokenizer, val_prompt, max_new_tokens, temperature, top_k, top_p, seed, device)
+        eos_token_id = tokenizer.token_to_id("<|endoftext|>")
+        generated_text = generateLLM(model, tokenizer, val_prompt, max_new_tokens, temperature, top_k, top_p, eos_token_id, seed, device)
         return generated_text
 
 def train_LLM(
     model: TransformerLM,
-    optimizer: AdamW,
     tokenizer: Tokenizer,
     num_iters: int,
     device: str,
@@ -97,6 +97,15 @@ def train_LLM(
         log_interval: How often to log training metrics
         log_wandb: Whether to log to Weights & Biases
     """
+    # Handle output directory creation
+    if os.path.exists(out):
+        if os.path.isfile(out):
+            # If it's a file, create a directory with a different name
+            out = f"{out}_dir"
+            logger.info(f"Output path was a file, using directory instead: {out}")
+    os.makedirs(out, exist_ok=True)
+    logger.info(f"Using output directory: {out}")
+
     logger.info(f"Starting training with device: {device}, precision: {args.precision}")
     logger.info(f"Model parameters: d_model={args.d_model}, num_layers={args.num_layers}, num_heads={args.num_heads}")
     logger.info(f"Training parameters: batch_size={args.batch_size}, context_length={args.context_length}, num_iters={num_iters}")
@@ -113,7 +122,14 @@ def train_LLM(
     else:
         precision = torch.float32
         logger.info("Using float32 precision")
-    
+        
+    optimizer = AdamW(
+        model.parameters(),
+        lr=args.max_lr,
+        betas = (args.beta1, args.beta2),
+        eps=1e-6 if args.precision == "bfloat16" else 1e-8,
+        weight_decay=args.weight_decay,
+    )
     # Convert device string to torch.device object
     device = torch.device(device)
     
@@ -164,7 +180,8 @@ def train_LLM(
                 })
         if step % checkpoint_interval == 0:
             logger.info(f"Saving checkpoint at step {step}")
-            save_checkpoint(model, optimizer, step, out)
+            checkpoint_path = os.path.join(out, f"checkpoint_{step:06d}.pt")
+            save_checkpoint(model, optimizer, step, checkpoint_path)
         if step > 0 and (step % args.validation_interval == 0 or step == num_iters - 1):
             logger.info(f"Running validation at step {step}")
             avg_loss, avg_perplexity = validate(model, val_dataloader, device, precision)
@@ -172,7 +189,9 @@ def train_LLM(
             if avg_loss < best_loss:
                 logger.info(f"New best validation loss: {avg_loss:.4f} (previous: {best_loss:.4f})")
                 best_loss = avg_loss
-                save_checkpoint(model, optimizer, step, out, is_best=True)
+                # Save best model with a different filename
+                best_model_path = os.path.join(out, "best_model.pt")
+                save_checkpoint(model, optimizer, step, best_model_path)
             logger.info("Generating sample text...")
             generated_text = run_generation(model, tokenizer, args.val_prompt, 
                            args.max_new_tokens, args.temperature, 
@@ -192,6 +211,14 @@ def train_LLM(
             "num_iters": num_iters
         })
     logger.info(f"Best loss: {best_loss:.4f}")
+
+    # Save final model
+    final_model_path = os.path.join(out, "final_model.pt")
+    save_checkpoint(model, optimizer, args.num_iters, final_model_path)
+
+    # Log to Weights & Biases
+    if args.log_wandb and WANDB_AVAILABLE:
+        wandb.finish()
 
     return 
 
@@ -229,9 +256,9 @@ def validate(
         
 
 
-def load_tokenizer(tokenizer_pickle_path: str, special_tokens: list[str]):
-    tokenizer = Tokenizer.from_pickle(tokenizer_pickle_path, special_tokens=special_tokens)
-    logger.info(f"Tokenizer loaded from {tokenizer_pickle_path} with vocabulary size {len(tokenizer.vocab)}")
+def load_tokenizer(vocab_path: str, merges_path: str, special_tokens: list[str]):
+    tokenizer = ByteLevelBPETokenizer(vocab_path, merges_path)
+    logger.info(f"Tokenizer loaded from {vocab_path} and {merges_path} with vocabulary size {len(tokenizer.get_vocab())}")
     return tokenizer
 
 if __name__ == "__main__":
@@ -272,7 +299,7 @@ if __name__ == "__main__":
     parser.add_argument("--context_length", type=int, 
                       help="Maximum sequence length/context window", default=256)
     parser.add_argument("--num_iters", type=int,
-                      help="Total number of training iterations", default=10000)
+                      help="Total number of training iterations", default=100000)
     parser.add_argument("--device", type=str, 
                       help="Device to train on (e.g. 'cuda:0' or 'cpu')", default="cuda:0")
     parser.add_argument("--out", type=str, default="checkpoints",
@@ -294,7 +321,7 @@ if __name__ == "__main__":
                       help="Maximum gradient norm for gradient clipping")
     parser.add_argument("--beta1", type=float, default=0.9,
                       help="Beta1 parameter for AdamW optimizer")
-    parser.add_argument("--beta2", type=float, default=0.999,
+    parser.add_argument("--beta2", type=float, default=0.95,
                       help="Beta2 parameter for AdamW optimizer")
     
     # Logging and checkpointing args
@@ -315,7 +342,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--max_new_tokens", type=int, default=100,
                       help="Maximum number of tokens to generate")
-    parser.add_argument("--precision", type=str, default="bfloat16",
+    parser.add_argument("--precision", type=str, default="float32",
                       help="Precision for training")
     parser.add_argument("--resume_from_checkpoint", type=str, default=None,
                       help="Path to the checkpoint to resume from")
@@ -352,7 +379,7 @@ if __name__ == "__main__":
         logger.info("No validation dataset provided")
     
     logger.info(f"Loading tokenizer from {args.vocab_path} and {args.merges_path}")
-    tokenizer = ByteLevelBPETokenizer(args.vocab_path, args.merges_path)
+    tokenizer = load_tokenizer(args.vocab_path, args.merges_path, args.special_tokens)
     logger.info(f"Tokenizer loaded with vocabulary size: {len(tokenizer.get_vocab())}")
     eot_id = tokenizer.token_to_id(args.special_tokens[0])
 
@@ -386,13 +413,7 @@ if __name__ == "__main__":
 
     # Load optimizer
     logger.info("Initializing optimizer...")
-    optimizer = AdamW(
-        model.parameters(),
-        lr=args.max_lr,
-        betas = (args.beta1, args.beta2),
-        eps=1e-8,
-        weight_decay=args.weight_decay,
-    )
+
     logger.info(f"Optimizer initialized with max_lr={args.max_lr}, weight_decay={args.weight_decay}")
     scheduler = get_lr_cosine_schedule(
         it = 0,
@@ -405,7 +426,6 @@ if __name__ == "__main__":
 
     train_LLM(
         model=model,
-        optimizer=optimizer,
         tokenizer=tokenizer,
         num_iters=args.num_iters,
         device=args.device,
@@ -420,7 +440,7 @@ if __name__ == "__main__":
 
 
     # Save model
-    save_checkpoint(model, optimizer, args.num_iters, args.out)
+    #save_checkpoint(model, optimizer, args.num_iters, args.out)
 
     # Log to Weights & Biases
     if args.log_wandb and WANDB_AVAILABLE:

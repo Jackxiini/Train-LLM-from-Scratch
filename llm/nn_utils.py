@@ -15,14 +15,26 @@ def cross_entropy(inputs: Float[Tensor, "batch_size seq_len vocab_size"],
     inputs shape: (batch_size, seq_len, vocab_size)
     targets shape: (batch_size, seq_len)
     """
-    m = inputs.amax(dim=-1, keepdim=True)
-    log_sum_exp = m + (inputs - m).logsumexp(dim=-1, keepdim=True)
-    target_logits = inputs.gather(dim=-1, index=targets.unsqueeze(-1))
-    loss = log_sum_exp - target_logits
-    return loss.mean()
+    # Normalize logits for numerical stability
+    logits_max = inputs.amax(dim=-1, keepdim=True)
+    logits = inputs - logits_max  # Subtract max for numerical stability
+    
+    # Compute log probabilities using log_softmax
+    log_probs = logits - logits.logsumexp(dim=-1, keepdim=True)
+    
+    # Gather target log probabilities
+    target_log_probs = log_probs.gather(dim=-1, index=targets.unsqueeze(-1))
+    
+    # Compute loss
+    loss = -target_log_probs.mean()
+    return loss
 
-def perplexity(inputs: Float[Tensor, "batch_size seq_len vocab_size"]) -> Tensor:
-    return torch.exp(cross_entropy(inputs))
+def perplexity(loss: Tensor) -> Tensor:
+    """
+    Compute perplexity from cross-entropy loss.
+    Clamp loss to avoid overflow when exponentiating.
+    """
+    return torch.exp(torch.clamp(loss, max=100.0))  # Clamp to avoid overflow
 
 
 

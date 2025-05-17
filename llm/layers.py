@@ -33,10 +33,10 @@ class Embedding(nn.Module):
     
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         assert token_ids.dtype == torch.long, "token_ids must be a long tensor"
-        return self.weight[token_ids]
+        return torch.nn.functional.embedding(token_ids, self.weight)
 
 class RMSNorm(nn.Module):
-    def __init__(self, d_model: int, eps: float = 1e-5, device=None, dtype=None):
+    def __init__(self, d_model: int, eps: float = 1e-6, device=None, dtype=None):
         super().__init__()
         self.d_model = d_model
         self.eps = eps
@@ -48,12 +48,17 @@ class RMSNorm(nn.Module):
         X shape: (batch_size, sequence_length, d_model)
         out shape: (batch_size, sequence_length, d_model)
         """
-        in_type = X.dtype
-        X_fp32 = X.to(torch.float32)
-        X_norm = torch.mean(X_fp32**2, dim=-1, keepdim=True) + self.eps
-        X_norm = X_norm.sqrt()
-        result = self.weight * X_fp32 / X_norm
-        return result.to(in_type)
+        dtype = X.dtype
+        
+        X_squared = X * X
+        X_mean = X_squared.mean(dim=-1, keepdim=True)
+        
+        X_norm = torch.sqrt(X_mean + self.eps)
+        
+        normalized = X / X_norm
+        result = self.weight * normalized
+        
+        return result.to(dtype)
     
 class SiLU(nn.Module):
     def forward(self, X: torch.Tensor) -> torch.Tensor:
@@ -79,11 +84,12 @@ class SwiGLU(nn.Module):
         return self.w2(SiLU()(self.w1(X))*self.w3(X))
 
 class RotaryPositionalEmbedding(nn.Module):
-    def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None, dtype=None):
         super().__init__()
         self.theta = theta
         self.d_k = d_k
         self.max_seq_len = max_seq_len
+        self.dtype = dtype
         assert d_k % 2 == 0, "d_k should be even"
         k = torch.arange(d_k // 2, device=device, dtype=torch.float32)
         theta_scale = 1.0 / (theta ** (2*k/d_k))
@@ -100,40 +106,25 @@ class RotaryPositionalEmbedding(nn.Module):
         token_positions shape: (..., sequence_length)
         out shape: (..., sequence_length, d_k)
         """
-        # Apply RoPE (Rotary Position Embedding) to input x:
-        # 
-        # Given x = [x0, x1, x2, x3, ..., x_{d-2}, x_{d-1}], we split it into d/2 pairs:
-        #    [(x0, x1), (x2, x3), ..., (x_{d-2}, x_{d-1})]
-        #
-        # For each pair (x_{2k}, x_{2k+1}), RoPE applies a rotation:
-        # [
-        #   x_{2k} * cos(m * θ_k) - x_{2k+1} * sin(m * θ_k),
-        #   x_{2k} * sin(m * θ_k) + x_{2k+1} * cos(m * θ_k)
-        # ]
-        #
-        # Here:
-        # - m is the position index in the sequence
-        # - θ_k is the frequency base for the k-th dimension
-        #   (typically: θ_k = 1 / θ^{2k/d})
-        # - cos and sin are precomputed lookup tables of shape (max_seq_len, d/2)
-        #
-        # In code:
-        # - cos/sin are expanded to match the full last dim via repeat_interleave
-        # - (-x_odd, x_even) interleaving simulates imaginary rotation
-        # - Final result is:
-        #     x * cos + x_rotated * sin
-
-        cos_theta_ik = self.cos_theta_ik[token_positions]
-        sin_theta_ik = self.sin_theta_ik[token_positions]
+        in_type = X.dtype
+        cos_theta_ik = self.cos_theta_ik[token_positions].to(in_type)
+        sin_theta_ik = self.sin_theta_ik[token_positions].to(in_type)
         cos_theta_ik = torch.repeat_interleave(cos_theta_ik, 2, dim=-1)
         sin_theta_ik = torch.repeat_interleave(sin_theta_ik, 2, dim=-1)
         X_rotated = torch.stack([-X[..., 1::2], X[..., ::2]], dim=-1).reshape_as(X)
         return X * cos_theta_ik + X_rotated * sin_theta_ik
 
-def softmax(X: torch.Tensor, dim: int = -1) -> torch.Tensor:
-    max_X = torch.max(X, dim=dim, keepdim=True).values
-    exp_X = torch.exp(X - max_X)
-    return exp_X / torch.sum(exp_X, dim=dim, keepdim=True)
+def softmax(inputs: torch.Tensor, dim: int = -1) -> torch.Tensor:
+    """
+    Compute softmax along the specified dimension.
+    inputs shape: (..., dim)
+    out shape: (..., dim)
+    """
+    in_type = inputs.dtype
+    inputs_fp32 = inputs.to(torch.float32)
+    m = inputs_fp32.amax(dim=dim, keepdim=True)
+    exp_inputs = torch.exp(inputs_fp32 - m)
+    return (exp_inputs / exp_inputs.sum(dim=dim, keepdim=True)).to(in_type)
 
 def scaled_dot_product_attention(
     Q: torch.Tensor,
@@ -150,9 +141,9 @@ def scaled_dot_product_attention(
     """
     d_k = K.shape[-1]
     attention_score = einops.einsum(Q, K, "... queries d_k, ... keys d_k -> ... queries keys")
-    attention_score /= math.sqrt(d_k)
+    attention_score = attention_score / math.sqrt(d_k)  # Use division instead of /= to preserve dtype
     if mask is not None:
-        attention_score = attention_score.masked_fill(mask == 0, -torch.inf)
+        attention_score = attention_score.masked_fill(~mask, float("-inf"))  # Use ~mask instead of mask == 0
     attention_weights = softmax(attention_score, dim=-1)
     output = einops.einsum(attention_weights, V, "... queries keys, ... keys d_v -> ... queries d_v")
     return output
@@ -189,7 +180,7 @@ class CausalMultiHeadAttentionRoPE(nn.Module):
         self.d_model = d_model
         self.n_heads = n_heads
         self.d_k = d_model // n_heads
-        self.RoPE = RotaryPositionalEmbedding(theta=theta, d_k=self.d_k, max_seq_len=max_seq_len, device=device)
+        self.RoPE = RotaryPositionalEmbedding(theta=theta, d_k=self.d_k, max_seq_len=max_seq_len, device=device, dtype=dtype)
     
     def forward(self, X: torch.Tensor, token_positions: torch.Tensor = None) -> torch.Tensor:
         """
@@ -199,146 +190,29 @@ class CausalMultiHeadAttentionRoPE(nn.Module):
         B, L, _ = X.shape
         d_k = self.d_k
 
-        # 1) 生成 token_positions
+        # 1) Generate token positions
         if token_positions is None:
-            # arange -> shape (L,)
             token_positions = torch.arange(L, device=X.device, dtype=torch.long)
-            # unsqueeze & expand -> shape (B, L)
             token_positions = token_positions.unsqueeze(0).expand(B, L)
-        # 再插入 head 维度 -> (B, 1, L)
-        token_positions = token_positions.unsqueeze(1)
+        token_positions = token_positions.unsqueeze(1)  # Add head dimension -> (B, 1, L)
 
-        # 2) QKV 投影 & reshape -> (B, heads, L, d_k)
+        # 2) QKV projection & reshape -> (B, heads, L, d_k)
         Q, K, V = self.qkv_proj(X).chunk(3, dim=-1)
         Q = einops.rearrange(Q, "b l (h dk) -> b h l dk", h=self.n_heads, dk=d_k)
         K = einops.rearrange(K, "b l (h dk) -> b h l dk", h=self.n_heads, dk=d_k)
-        V = einops.rearrange(V, "b l (h dk) -> b h l dk", h=self.n_heads, dk=d_k)  # 用 d_k 代替 d_v
+        V = einops.rearrange(V, "b l (h dk) -> b h l dk", h=self.n_heads, dk=d_k)
 
-        # 3) 应用 RoPE
-        Q = self.RoPE(Q, token_positions)  # RoPE 里会把 token_positions 广播到 head 维度
+        # 3) Apply RoPE
+        Q = self.RoPE(Q, token_positions)
         K = self.RoPE(K, token_positions)
 
-        # 4) causal mask -> (1,1,L,L)
+        # 4) Create causal mask -> (1,1,L,L)
         mask = torch.tril(torch.ones(L, L, device=X.device, dtype=torch.bool))
         mask = mask.unsqueeze(0).unsqueeze(0)
 
-        # 5) attention & 合并 heads
+        # 5) Attention & combine heads
         out = scaled_dot_product_attention(Q, K, V, mask=mask)    # (B,h,L,d_k)
         out = einops.rearrange(out, "b h l dk -> b l (h dk)")
 
-        # 6) 最后投影
+        # 6) Final projection
         return self.output_proj(out)
-'''
-
-class CausalMultiHeadAttentionRoPE(nn.Module):
-    """
-    Causal multi-headed self-attention layer with RoPE
-    Args:
-        d_model (int): Dimensionality of the feedforward input and output.
-        num_heads (int): Number of heads to use in multi-headed attention.
-        max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
-        theta (float): RoPE parameter.
-
-    Wq (h*d_k, d_model)
-    Wk (h*d_k, d_model)
-    Wv (h*d_v, d_model)
-    Wo (d_model, h*d_v)
-
-    let d_k = d_v = d_in = d_model / num_heads
-    """
-
-    def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        max_seq_len: int | None = None,
-        theta: float | None = None,
-        RoPE: RotaryPositionalEmbedding | None = None,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
-    ):
-        super().__init__()
-        assert d_model % num_heads == 0
-
-        # query, key, value projections for all heads, but in a batch
-        self.qkv_proj = Linear(d_model, d_model * 3, device=device, dtype=dtype)
-        # output projection
-        self.output_proj = Linear(d_model, d_model, device=device, dtype=dtype)
-
-        self.d_model = d_model
-        self.num_heads = num_heads
-        self.head_size = d_model // num_heads
-
-        if RoPE is None:
-            assert max_seq_len is not None, "max_seq_len must be provided if RoPE is not provided"
-            assert theta is not None, "theta must be provided if RoPE is not provided"
-            self.RoPE = RotaryPositionalEmbedding(theta, self.head_size, max_seq_len, device=device)
-        else:
-            self.RoPE = RoPE
-
-    def forward(
-        self,
-        in_features,
-        token_positions: torch.Tensor = None,
-    ):
-        """
-        Forward pass for the attention mechanism.
-
-        Args:
-            in_features (Float[Tensor, "... sequence_length d_in"]): input tensor
-            token_positions (Int[Tensor, "... sequence_length"] | None): Optional tensor with the positions of the tokens
-
-        Returns:
-            Float[Tensor, " ... sequence_length d_out"]: Output tensor after applying attention.
-        """
-        *batch, sequence_length, d_model = in_features.shape
-        assert d_model == self.d_model, f"Expected d_model {self.d_model}, but got {d_model}"
-        qkv = self.qkv_proj(in_features)  # (..., sequence_length, 3*d_model)
-        q, k, v = qkv.split(self.d_model, dim=-1)  # (..., T, d_model) x 3
-
-        q = rearrange(
-            q,
-            "batch sequence_length (num_heads head_size) -> batch num_heads sequence_length head_size",
-            head_size=self.head_size,
-            num_heads=self.num_heads,
-        )
-        k = rearrange(
-            k,
-            "batch sequence_length (num_heads head_size) -> batch num_heads sequence_length head_size",
-            head_size=self.head_size,
-            num_heads=self.num_heads,
-        )
-        v = rearrange(
-            v,
-            "batch sequence_length (num_heads head_size) -> batch num_heads sequence_length head_size",
-            head_size=self.head_size,
-            num_heads=self.num_heads,
-        )
-
-        if token_positions is None:
-            # (1, 1, sequence_length)
-            token_positions = torch.arange(sequence_length, device=in_features.device)
-            token_positions = einx.rearrange("seq -> batch... seq", token_positions, batch=[1] * len(batch))
-
-        # Duplicate token positions for each head
-        token_positions = rearrange(token_positions, "... seq -> ... 1 seq")
-
-        q = self.RoPE(q, token_positions)
-        k = self.RoPE(k, token_positions)
-
-        # (..., queries, keys)
-        # boolean mask of shape (..., queries, keys), which in this case is
-        # (..., sequence_length, sequence_length). assume len(batch) == 1
-        causal_mask = torch.tril(
-            torch.ones((sequence_length, sequence_length), dtype=torch.bool, device=in_features.device)
-        )
-        causal_mask = causal_mask[None, None, :, :]  # [1, 1, seq, seq]
-        attention = scaled_dot_product_attention(q, k, v, causal_mask)  # (B, nh, seq_len, head_size)
-
-        attention = rearrange(
-            attention, "batch num_heads sequence_length head_size -> batch sequence_length (num_heads head_size)"
-        ).contiguous()
-        # output projection
-        out = self.output_proj(attention)
-        return out
-'''

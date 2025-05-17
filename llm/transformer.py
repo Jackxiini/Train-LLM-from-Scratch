@@ -123,17 +123,25 @@ class TransformerLM(nn.Module):
             generator.manual_seed(seed)
 
         generated_token_ids = []
+        current_prompt = prompt_token_ids
         while len(generated_token_ids) < max_new_tokens:
-            logits = self.forward(prompt_token_ids) # (1, context_length, vocab_size)
+            logits = self.forward(current_prompt) # (1, context_length, vocab_size)
             new_token_logits = logits[0,-1] # (..., vocab_size)
-            #probs = softmax(new_token_logits / temperature)
+            
+            # Apply temperature scaling
+            if temperature > 0:
+                new_token_logits = new_token_logits / temperature
+            
+            # Apply top-k filtering
             if top_k > 0 and top_k < self.vocab_size:
                 top_k_probs, top_k_indices = torch.topk(new_token_logits, top_k, dim=-1)
                 probs = softmax(top_k_probs, dim=-1)
+                vocab_indices = top_k_indices
             else:
                 probs = softmax(new_token_logits, dim=-1)
-                top_k_indices = torch.arange(self.vocab_size, device=device)
+                vocab_indices = torch.arange(self.vocab_size, device=device)
             
+            # Apply top-p (nucleus) filtering
             if top_p > 0.0:
                 prob_sorted, indices_sorted = torch.sort(probs, dim=-1, descending=True)
                 cum_probs = torch.cumsum(prob_sorted, dim=-1)
@@ -141,15 +149,19 @@ class TransformerLM(nn.Module):
                 threshold_index = 0 if len(threshold_indices) == 0 else threshold_indices[-1]
                 probs = prob_sorted[:threshold_index+1]
                 top_p_indices = indices_sorted[:threshold_index+1]
-                vocab_indices = top_k_indices[top_p_indices]
+                vocab_indices = vocab_indices[top_p_indices]
             
+            # Sample from the filtered distribution
             sample_index = torch.multinomial(probs, num_samples=1, replacement=True, generator=generator).item()
-            generated_token_ids.append(vocab_indices[sample_index])
-            if eos_token_id is not None and generated_token_ids[-1] == eos_token_id:
+            new_token = vocab_indices[sample_index]
+            generated_token_ids.append(new_token)
+            
+            if eos_token_id is not None and new_token == eos_token_id:
                 break
 
-            prompt_new = torch.cat([prompt_token_ids, torch.tensor(generated_token_ids, device=device)], dim=1)
-            prompt_token_ids = prompt_new
+            # Update current prompt by shifting and adding new token
+            new_token_tensor = torch.tensor([[new_token]], device=device)  # Shape: (1, 1)
+            current_prompt = torch.cat([current_prompt[:, 1:], new_token_tensor], dim=1)
 
         return torch.tensor(generated_token_ids, device=device)
 

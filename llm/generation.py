@@ -20,16 +20,16 @@ def generateLLM(
         temperature: float = 1.0,
         top_k: int = 0,
         top_p: float = 0.0,
-        eos_token: str = "<|endoftext|>",
+        eos_token_id: int = None,
         seed: int = None,
         device: str = None):
     
     if not device:
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-    prompt_token_ids = tokenizer.encode(prompt)
-    prompt_token_ids = torch.tensor(prompt_token_ids, dtype=torch.int64, device=device)
-    eos_token_id = tokenizer.encode(eos_token)[0]
+    # Get token IDs from the Encoding object
+    encoding = tokenizer.encode(prompt)
+    prompt_token_ids = torch.tensor(encoding.ids, dtype=torch.int64, device=device).unsqueeze(0)  # Add batch dimension
 
     with temporary_eval_model(model), torch.inference_mode():
         generated_token_ids = model.generate(prompt_token_ids=prompt_token_ids,
