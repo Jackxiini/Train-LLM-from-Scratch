@@ -68,3 +68,33 @@ To start training the Transformer model:
 uv run llm/train/train_llm.py
 ```
 Note: Training is currently supported with float32 precision only. Use of bfloat16 may result in unstable loss (NaNs).
+
+If trained correct, the model can acheive around 1.2822 for validation loss with following hyperparameters:
+```
+uv run llm/train/train_llm.py \
+  --train_dataset_path ../data/TS_train_encoded.npy \
+  --val_dataset_path ../data/TS_valid_encoded.npy \
+  --vocab_size 50257 \
+  --special_tokens '["<|endoftext|>"]' \
+  --vocab_path bpe_10k_TSV2/tsv2-vocab.json \
+  --merges_path bpe_10k_TSV2/tsv2-merges.txt \
+  --d_model 512 \
+  --num_layers 4 \
+  --num_heads 16 \
+  --d_ff 1344 \
+  --rope_theta 10000.0 \
+  --batch_size 128 \
+  --context_length 256 \
+  --num_iters 50000 \
+  --max_lr 1e-3 \
+  --min_lr 1e-5 \
+  --warmup_iters 10000 \
+  --weight_decay 0.01 \
+  --gradient_max_norm 1.0 \
+  --beta1 0.9 \
+  --beta2 0.95 \
+  --checkpoint_interval 1000 \
+  --temperature 1.0 \
+  --top_k 10 \
+  --top_p 0.0 \
+```
