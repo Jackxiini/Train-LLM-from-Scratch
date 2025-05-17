@@ -9,6 +9,7 @@ You can now run any code in the repo using
 ```sh
 uv run <python_file_path>
 ```
+H100 or A100 80G is required.
 
 ### Download data
 Download the TinyStories data and a subsample of OpenWebText
