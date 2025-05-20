@@ -24,6 +24,7 @@ from collections.abc import Iterator
 from torch.utils.data import IterableDataset
 import logging
 from torch.amp import autocast
+from torch.utils.tensorboard import SummaryWriter
 
 try:
     import wandb
@@ -106,6 +107,11 @@ def train_LLM(
     os.makedirs(out, exist_ok=True)
     logger.info(f"Using output directory: {out}")
 
+    # Initialize TensorBoard writer
+    tensorboard_dir = os.path.join(out, "tensorboard")
+    writer = SummaryWriter(tensorboard_dir)
+    logger.info(f"TensorBoard logs will be saved to {tensorboard_dir}")
+
     logger.info(f"Starting training with device: {device}, precision: {args.precision}")
     logger.info(f"Model parameters: d_model={args.d_model}, num_layers={args.num_layers}, num_heads={args.num_heads}")
     logger.info(f"Training parameters: batch_size={args.batch_size}, context_length={args.context_length}, num_iters={num_iters}")
@@ -169,6 +175,12 @@ def train_LLM(
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr
         optimizer.step()
+
+        # Log to TensorBoard
+        writer.add_scalar('Loss/train', loss.item(), step)
+        writer.add_scalar('Perplexity/train', perplexity.item(), step)
+        writer.add_scalar('Learning_rate', lr, step)
+
         if step % log_interval == 0:
             logger.info(f"Step {step}/{num_iters} loss: {loss.item():.4f} perplexity: {perplexity.item():.4f} lr: {lr:.6f}")
             if log_wandb and WANDB_AVAILABLE:
@@ -186,6 +198,11 @@ def train_LLM(
             logger.info(f"Running validation at step {step}")
             avg_loss, avg_perplexity = validate(model, val_dataloader, device, precision)
             logger.info(f"Validation at step {step} - loss: {avg_loss:.4f} perplexity: {avg_perplexity:.4f}")
+            
+            # Log validation metrics to TensorBoard
+            writer.add_scalar('Loss/validation', avg_loss, step)
+            writer.add_scalar('Perplexity/validation', avg_perplexity, step)
+            
             if avg_loss < best_loss:
                 logger.info(f"New best validation loss: {avg_loss:.4f} (previous: {best_loss:.4f})")
                 best_loss = avg_loss
@@ -204,6 +221,8 @@ def train_LLM(
                     "generated_text": generated_text
                 })
             
+    # Close TensorBoard writer
+    writer.close()
     logger.info(f"Training complete. Best loss: {best_loss:.4f}")
     if log_wandb and WANDB_AVAILABLE:
         wandb.log({
@@ -329,7 +348,7 @@ if __name__ == "__main__":
                       help="Whether to log to Weights & Biases", default=False)
     parser.add_argument("--log_interval", type=int, 
                       help="How often to log training metrics", default=1000)
-    parser.add_argument("--checkpoint_interval", type=int, default=1000,
+    parser.add_argument("--checkpoint_interval", type=int, default=10000,
                       help="How often to save model checkpoints")
     parser.add_argument("--seed", type=int, default=42,
                       help="Random seed for reproducibility")
@@ -340,12 +359,16 @@ if __name__ == "__main__":
     parser.add_argument("--top_p", type=float, default=0.0,
                       help="Top-p for generation")
 
-    parser.add_argument("--max_new_tokens", type=int, default=100,
+    parser.add_argument("--max_new_tokens", type=int, default=200,
                       help="Maximum number of tokens to generate")
     parser.add_argument("--precision", type=str, default="float32",
                       help="Precision for training")
     parser.add_argument("--resume_from_checkpoint", type=str, default=None,
                       help="Path to the checkpoint to resume from")
+
+    # Add TensorBoard argument
+    parser.add_argument("--tensorboard", type=bool, default=True,
+                      help="Whether to log metrics to TensorBoard")
 
     args = parser.parse_args()
     
