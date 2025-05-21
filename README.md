@@ -1,7 +1,8 @@
 # Train LLM from Scratch
 This repository provides a modern implementation of a Transformer-based language model trained entirely from scratch. It includes preprocessing pipelines, a tokenizer trainer, and a modern Transformer architecture.
-### Update
-Add distributed learning for larger model
+### Update Notes
+#### Added Support for Distributed Training
+Added distributed learning capabilities to facilitate the training of larger models across multiple GPUs or nodes.
 ## Setup
 ### Environment
 Install `uv` [here](https://github.com/astral-sh/uv) (recommended), or run `pip install uv`/`brew install uv`.
