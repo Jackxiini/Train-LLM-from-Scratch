@@ -14,4 +14,4 @@ module load python/3.10.1-5r
 source /scratch/wxi/Train-LLM-from-Scratch/
 
 ## Execute script
-python llm/train/train_llm.py --num_iters 100000 --batch_size 256 --vocab_size 10000
+python llm/train/train_llm.py --num_iters 30000 --batch_size 256 --vocab_size 10000

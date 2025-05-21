@@ -36,7 +36,7 @@ class Embedding(nn.Module):
         return torch.nn.functional.embedding(token_ids, self.weight)
 
 class RMSNorm(nn.Module):
-    def __init__(self, d_model: int, eps: float = 1e-6, device=None, dtype=None):
+    def __init__(self, d_model: int, eps: float = 1e-5, device=None, dtype=None):
         super().__init__()
         self.d_model = d_model
         self.eps = eps
@@ -48,17 +48,12 @@ class RMSNorm(nn.Module):
         X shape: (batch_size, sequence_length, d_model)
         out shape: (batch_size, sequence_length, d_model)
         """
-        dtype = X.dtype
-        
+        in_type = X.dtype
         X_squared = X * X
         X_mean = X_squared.mean(dim=-1, keepdim=True)
-        
         X_norm = torch.sqrt(X_mean + self.eps)
-        
-        normalized = X / X_norm
-        result = self.weight * normalized
-        
-        return result.to(dtype)
+        result = self.weight * (X / X_norm)
+        return result.to(in_type)
     
 class SiLU(nn.Module):
     def forward(self, X: torch.Tensor) -> torch.Tensor:
@@ -80,8 +75,11 @@ class SwiGLU(nn.Module):
         self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
         self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
     
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
-        return self.w2(SiLU()(self.w1(X))*self.w3(X))
+    def forward(self, X: torch.Tensor, if_gated = True) -> torch.Tensor:
+        if if_gated:
+            return self.w2(SiLU()(self.w1(X))*self.w3(X))
+        else:
+            return self.w2(SiLU()(self.w1(X)))
 
 class RotaryPositionalEmbedding(nn.Module):
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None, dtype=None):
@@ -182,7 +180,7 @@ class CausalMultiHeadAttentionRoPE(nn.Module):
         self.d_k = d_model // n_heads
         self.RoPE = RotaryPositionalEmbedding(theta=theta, d_k=self.d_k, max_seq_len=max_seq_len, device=device, dtype=dtype)
     
-    def forward(self, X: torch.Tensor, token_positions: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, X: torch.Tensor, token_positions: torch.Tensor = None, if_RoPE = True) -> torch.Tensor:
         """
         X: (batch, seq_len, d_model)
         token_positions: (batch, seq_len) or None
@@ -203,8 +201,9 @@ class CausalMultiHeadAttentionRoPE(nn.Module):
         V = einops.rearrange(V, "b l (h dk) -> b h l dk", h=self.n_heads, dk=d_k)
 
         # 3) Apply RoPE
-        Q = self.RoPE(Q, token_positions)
-        K = self.RoPE(K, token_positions)
+        if if_RoPE:
+            Q = self.RoPE(Q, token_positions)
+            K = self.RoPE(K, token_positions)
 
         # 4) Create causal mask -> (1,1,L,L)
         mask = torch.tril(torch.ones(L, L, device=X.device, dtype=torch.bool))

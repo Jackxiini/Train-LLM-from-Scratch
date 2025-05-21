@@ -35,16 +35,22 @@ class TransformerBlock(nn.Module):
         self.ln2 = RMSNorm(d_model, device=device, dtype=dtype)
         self.ffn = SwiGLU(d_model, d_ff, device=device, dtype=dtype)
 
-    def forward(self, X: torch.Tensor, token_positions: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, X: torch.Tensor, token_positions: torch.Tensor = None, if_prenorm = True) -> torch.Tensor:
         """
         X shape: (..., sequence_length, d_model)
         token_positions shape: (..., sequence_length)
         out shape: (..., sequence_length, d_model)
         """
-        X = self.ln1(X)
-        X = self.attn(X, token_positions) + X
-        X = self.ln2(X)
-        X = self.ffn(X) + X
+        if if_prenorm:
+            X = self.ln1(X)
+            X = self.attn(X, token_positions) + X
+            X = self.ln2(X)
+            X = self.ffn(X) + X
+        else:
+            X = self.attn(X, token_positions) + X
+            X = self.ln1(X)
+            X = self.ffn(X) + X
+            X = self.ln2(X)
 
         return X
 

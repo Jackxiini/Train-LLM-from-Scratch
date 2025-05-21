@@ -26,6 +26,8 @@ import logging
 from torch.amp import autocast
 from torch.utils.tensorboard import SummaryWriter
 
+#python llm/train/train_llm.py --train_dataset_path ../data/owt_train_encoded.npy --val_dataset_path ../data/owt_valid_encoded.npy --vocab_path bpe_32k_owt/owt-vocab.json --merges_path bpe_32k_owt/owt-merges.txt --num_iters 100000 --batch_size 128
+
 try:
     import wandb
     WANDB_AVAILABLE = True
@@ -34,7 +36,7 @@ except ImportError:
 
 VAL_PROMPTS = [
     "Once upon a time there was a big man named Jack. He was a good",
-    "Once upon a time, there was a pretty girl named Lily. She hated to swin",
+    "Once upon a time, there was a pretty girl named Lily.",
 ]
 
 def set_all_seeds(seed: int):
@@ -325,7 +327,7 @@ if __name__ == "__main__":
                       help="Directory to save model checkpoints")
     parser.add_argument("--validation_interval", type=int,
                       help="How often to validate the model", default=1000)
-    parser.add_argument("--val-prompt", type=str, default=VAL_PROMPTS[0],help="Prompt to use for validation generation")
+    parser.add_argument("--val-prompt", type=str, default=VAL_PROMPTS[1],help="Prompt to use for validation generation")
     
     # Optimizer args
     parser.add_argument("--max_lr", type=float, default=1e-3,
@@ -356,10 +358,10 @@ if __name__ == "__main__":
                       help="Temperature for generation")
     parser.add_argument("--top_k", type=int, default=10,
                       help="Top-k for generation")
-    parser.add_argument("--top_p", type=float, default=0.0,
+    parser.add_argument("--top_p", type=float, default=0.7,
                       help="Top-p for generation")
 
-    parser.add_argument("--max_new_tokens", type=int, default=200,
+    parser.add_argument("--max_new_tokens", type=int, default=256,
                       help="Maximum number of tokens to generate")
     parser.add_argument("--precision", type=str, default="float32",
                       help="Precision for training")

@@ -4,8 +4,6 @@ import argparse
 import numpy as np
 from tqdm import tqdm
 
-#uv run llm/train/train_tokenizer.py --input_path ../data/owt_train.txt --vocab_size 32000 --output_dir bpe_32k_owt --prefix owt --encoded_path owt_train_encoded.npy --train-bpe
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_path",     type=str,
@@ -69,7 +67,6 @@ def main():
     all_ids.extend(buffer)
 
     # 4. save the encoded data
-    print("Saving encoded data...")
     np.save(args.encoded_path, np.array(all_ids, dtype=np.uint16))
     print(f"encoded data saved to {args.encoded_path}")
 
