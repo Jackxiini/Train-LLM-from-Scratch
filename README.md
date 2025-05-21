@@ -84,9 +84,9 @@ uv run llm/train/train_llm.py \
   --num_heads 16 \
   --d_ff 1344 \
   --rope_theta 10000.0 \
-  --batch_size 128 \
+  --batch_size 256 \
   --context_length 256 \
-  --num_iters 50000 \
+  --num_iters 100000 \
   --max_lr 1e-3 \
   --min_lr 1e-5 \
   --warmup_iters 10000 \
@@ -97,5 +97,5 @@ uv run llm/train/train_llm.py \
   --checkpoint_interval 1000 \
   --temperature 1.0 \
   --top_k 10 \
-  --top_p 0.0 \
+  --top_p 0.70 \
 ```
