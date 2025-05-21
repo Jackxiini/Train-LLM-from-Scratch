@@ -70,7 +70,7 @@ uv run llm/train/train_llm.py
 ```
 Note: Training is currently supported with float32 precision only. Use of bfloat16 may result in unstable loss (NaNs).
 
-When trained correctly, this model achieves a validation loss of approximately 1.5783 (at 10000 step) and 1.2806 (at 50000 step) using the default hyperparameters listed below on TinyStories dataset
+When trained correctly, this model achieves a validation loss of approximately 1.5783 (at 10k step), 1.2806 (at 50k step) and 1.2188 (at 100k step) using the default hyperparameters listed below on TinyStories dataset
 ```
 uv run llm/train/train_llm.py \
   --train_dataset_path ../data/TS_train_encoded.npy \
